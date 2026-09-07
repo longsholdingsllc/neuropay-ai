@@ -1,24 +1,14 @@
 {
   "name": "neuropay-ai",
   "version": "1.0.0",
-  "description": "Multi-tenant field-service SaaS with AI-powered workflows",
   "private": true,
-  "workspaces": [
-    "packages/api",
-    "packages/web",
-    "packages/mobile"
-  ],
+  "description": "NeuroPay AI — multi-tenant field-service management platform with AI-assisted workflows",
+  "workspaces": ["packages/*"],
   "scripts": {
-    "dev": "concurrently \"npm run dev -w packages/api\" \"npm run dev -w packages/web\"",
-    "build": "npm run build -w packages/api && npm run build -w packages/web",
-    "test": "npm run test -w packages/api",
-    "test:e2e": "npm run test:e2e -w packages/api",
-    "lint": "npm run lint -w packages/api && npm run lint -w packages/web",
-    "migrate": "npm run migrate -w packages/api",
-    "docker:build": "docker build -f Dockerfile.prod -t neuropay-ai:latest .",
-    "docker:up": "docker-compose -f docker-compose.prod.yml up -d"
+    "build": "npm run build --workspace=@neuropay/api && npm run build --workspace=@neuropay/web",
+    "test": "npm run test --workspace=@neuropay/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "start": "npm run start --workspace=@neuropay/api"
   },
-  "devDependencies": {
-    "concurrently": "^8.2.0"
-  }
+  "engines": { "node": ">=18" }
 }
