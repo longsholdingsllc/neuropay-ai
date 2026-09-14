@@ -69,6 +69,8 @@ Fly secrets, Docker secrets, or your platform's equivalent). Do not put them in
 
 ```bash
 docker build -t neuropay-ai .
+# The image runs as uid 1000. If you bind-mount a host directory, chown it first:
+#   sudo chown -R 1000:1000 /srv/neuropay-data
 docker run -d --name neuropay-ai -p 8080:8080 \
   -e JWT_SECRET="$(openssl rand -base64 48)" \
   -e ADMIN_EMAIL="you@yourdomain.com" \
@@ -131,6 +133,51 @@ curl -s -X POST https://<your-host>/api/auth/login \
 
 `/health` proves the process is up; `/ready` additionally proves the database is
 reachable — use `/ready` as the real readiness gate.
+
+## Container security model
+
+The image runs as the built-in unprivileged **`node`** user (uid 1000), not root.
+
+### Volume ownership is load-bearing
+
+The runtime stage creates `/app/packages/api/data` and chowns it to `node`, then
+drops privileges with `USER node`. This ordering matters.
+
+The app enables SQLite **WAL** mode, which needs write access to the *directory* —
+for the `-wal` and `-shm` sidecar files — not just the database file. A named
+volume is initialised from the image's directory, so a `node`-owned data directory
+is what lets the non-root process write to the volume.
+
+**If you bind-mount a host directory instead of using a named volume, you must
+chown it first:**
+
+```bash
+mkdir -p /srv/neuropay-data
+sudo chown -R 1000:1000 /srv/neuropay-data
+docker run -v /srv/neuropay-data:/app/packages/api/data ...
+```
+
+A root-owned data directory handed to a non-root process fails at startup with
+`SQLITE_CANTOPEN`. Verified both ways:
+
+| Data directory owner | Process user | Result |
+| --- | --- | --- |
+| `root:root` | uid 1000 | `SQLITE_CANTOPEN` |
+| `node:node` (uid 1000) | uid 1000 | opens, WAL enabled, writes succeed |
+
+### Render note
+
+The `render.yaml` disk is mounted at `/app/packages/api/data`. Render applies the
+mount at runtime, which can shadow the image's directory ownership. If the service
+fails to start with a database error, set `PUID`/`PGID` behaviour aside and instead
+confirm in Render's shell:
+
+```bash
+ls -ld /app/packages/api/data     # expect node node (or 1000:1000)
+```
+
+If it shows `root root`, chown it once from the Render shell. The Dockerfile
+handles the common named-volume case automatically.
 
 ## Operational notes
 
