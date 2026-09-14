@@ -190,11 +190,54 @@ handles the common named-volume case automatically.
   IP). Behind multiple replicas each holds its own counter; move to a shared
   store when you scale out.
 
-## CI
+## Continuous integration
 
-`ci/github-actions-ci.yml` runs `npm ci` → typecheck → test → build on every push
-and pull request. A red CI run blocks a deploy by convention; run it locally with:
+The workflow runs `npm ci` → typecheck → test → build on every push and on pull
+requests targeting `main`. A red run blocks a deploy by convention; run the same
+checks locally with:
 
 ```bash
 npm run typecheck && npm test && npm run build
 ```
+
+### Status: not yet activated
+
+The workflow lives at `ci/github-actions-ci.yml`, which GitHub **does not read**.
+It must sit at `.github/workflows/ci.yml` to run.
+
+This indirection is deliberate. The GitHub App token used to automate this
+repository does not hold the **`workflows`** permission, and GitHub refuses that
+path through both available routes:
+
+| Route | Result |
+| --- | --- |
+| `git push` adding a file under `.github/workflows/` | rejected — "refusing to allow a GitHub App to create or update workflow ... without `workflows` permission" |
+| Contents API `PUT /contents/.github/workflows/ci.yml` | `403 Resource not accessible by integration` |
+
+The workflow is therefore parked outside the protected path, and activation is one
+command.
+
+### Activating it
+
+**Option 1 — locally, if your login has the `workflows` scope:**
+
+```bash
+gh auth refresh -s workflow     # add the scope if missing
+./ci/activate-ci.sh             # or: ./ci/activate-ci.sh main
+```
+
+The script moves the file into `.github/workflows/ci.yml`, commits it, and pushes.
+
+**Option 2 — entirely in the browser, no tooling:**
+
+1. Open https://github.com/longsholdingsllc/neuropay-ai/new/main/.github/workflows
+2. Name the file `ci.yml`
+3. Paste the contents of `ci/github-actions-ci.yml`
+4. Commit
+
+**Option 3 — grant the automating App the `workflows` permission**, after which the
+path becomes writable and the move can be done directly. This is a repository-
+settings change made by an owner, not something the token can self-grant.
+
+Until activated, run the four checks locally before deploying. Nothing else in the
+deployment path depends on CI.
