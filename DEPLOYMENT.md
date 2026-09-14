@@ -33,6 +33,11 @@ All values are read from the process environment. **Never commit them.**
 | `ADMIN_EMAIL` | first boot | Initial owner account |
 | `ADMIN_PASSWORD` | first boot | Initial owner password |
 | `SEED_ON_BOOT` | no | `true` provisions the demo tenant once, when the DB is empty |
+
+> **First-boot credential.** With `SEED_ON_BOOT=true` and no `ADMIN_EMAIL` /
+> `ADMIN_PASSWORD` set, the seed creates `admin@example.com` / `ChangeMe123!`.
+> Set both explicitly and change the password immediately after the first login.
+> The seed only runs once — it is skipped whenever the tenant already exists.
 | `CORS_ORIGIN` | no | Comma-separated allow-list; `*` (default) reflects all |
 | `PUBLIC_APP_URL` | no | Public base URL |
 | `OPENAI_API_KEY` | no | Enables generative estimates; absent → local heuristic |
