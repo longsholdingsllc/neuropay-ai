@@ -28,8 +28,17 @@ RUN npm ci --omit=dev
 COPY --from=build /app/packages/api/dist ./packages/api/dist
 COPY --from=build /app/packages/web/dist ./packages/web/dist
 
-# Mount point for the SQLite database so it can live on a persistent volume.
-RUN mkdir -p /app/packages/api/data
+# Data directory for the SQLite database, owned by the unprivileged runtime user.
+#
+# Ownership here is load-bearing, not cosmetic. The app enables WAL, which needs
+# write access to the DIRECTORY (for the -wal and -shm sidecar files), not just
+# the database file. A named volume is initialised from the image's directory, so
+# creating it node-owned is what lets the non-root process write to the volume.
+# Handing back a root-owned volume would fail at startup with SQLITE_CANTOPEN.
+RUN mkdir -p /app/packages/api/data && chown -R node:node /app/packages/api/data
+
+# Drop privileges. The image ships a built-in unprivileged `node` user (uid 1000).
+USER node
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
