@@ -1,0 +1,20 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: development
+      PORT: "8080"
+      DATABASE_URL: file:/app/packages/api/data/neuropay.db
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-0123456789}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-owner@acme.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-neuropay}
+      SEED_ON_BOOT: "true"
+      PUBLIC_APP_URL: http://localhost:8080
+    volumes:
+      - neuropay_data:/app/packages/api/data
+    restart: unless-stopped
+
+volumes:
+  neuropay_data:
