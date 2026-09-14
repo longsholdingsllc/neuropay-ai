@@ -12,10 +12,18 @@ export interface Config {
   aiModel: string;
   stripeSecretKey?: string;
   publicAppUrl: string;
+  corsOrigin: string;
+  seedOnBoot: boolean;
 }
 
 function env(name: string): string | undefined {
   return process.env[name];
+}
+
+function bool(name: string, fallback = false): boolean {
+  const raw = env(name);
+  if (raw === undefined) return fallback;
+  return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
 }
 
 export function loadConfig(): Config {
@@ -30,7 +38,9 @@ export function loadConfig(): Config {
     openaiApiKey: env("OPENAI_API_KEY") || undefined,
     aiModel: env("AI_MODEL") || "gpt-4o-mini",
     stripeSecretKey: env("STRIPE_SECRET_KEY") || undefined,
-    publicAppUrl: env("PUBLIC_APP_URL") || "http://localhost:8080"
+    publicAppUrl: env("PUBLIC_APP_URL") || "http://localhost:8080",
+    corsOrigin: env("CORS_ORIGIN") || "*",
+    seedOnBoot: bool("SEED_ON_BOOT", false)
   };
 }
 

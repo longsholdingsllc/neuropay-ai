@@ -6,46 +6,41 @@ NeuroPay AI is a production-ready SaaS platform for field service management, fe
 
 ## 🏗️ Architecture
 
-- **Backend**: Node.js + Express + TypeScript
-- **Database**: PostgreSQL with multi-tenant isolation
-- **Frontend**: React + TypeScript
-- **Mobile**: React Native (Phase 1 skeleton)
-- **AI/Workflows**: Extensible AI agent architecture
-- **Auth**: JWT + 2FA (TOTP)
-- **Payments**: Stripe integration (boundary layer)
+- **Backend**: Node.js + Express + TypeScript (`packages/api`)
+- **Database**: SQLite via `better-sqlite3`, multi-tenant row scoping
+- **Frontend**: React + TypeScript + Vite (`packages/web`), served by the API
+- **Auth**: JWT (HS256) + bcrypt; role-based access control
+- **AI/Workflows**: pluggable estimator boundary (local heuristic → OpenAI)
+- **Payments**: boundary layer, manual ↔ Stripe
+
+The API serves the built web bundle, so a deployment is **one process and one URL**.
 
 ## 📦 Project Structure
 
 ```
 neuropay-ai/
 ├── packages/
-│   ├── api/              # Express API server
-│   │   ├── src/
-│   │   │   ├── auth/     # Authentication & authorization
-│   │   │   ├── tenants/  # Multi-tenant isolation
-│   │   │   ├── customers/
-│   │   │   ├── properties/
-│   │   │   ├── jobs/
-│   │   │   ├── technicians/
-│   │   │   ├── estimates/
-│   │   │   ├── invoices/
-│   │   │   ├── ai/       # AI workflow engine
-│   │   │   ├── payments/ # Payment integration boundary
-│   │   │   ├── db/       # Database layer
-│   │   │   └── middleware/
-│   │   ├── tests/
-│   │   └── migrations/
-│   ├── web/              # React owner dashboard
-│   └── mobile/           # React Native technician app
+│   ├── api/                 # Express API + serves the built web app
+│   │   └── src/
+│   │       ├── ai/            # AI workflow engine (estimator)
+│   │       ├── config/        # Environment configuration
+│   │       ├── db/            # Connection, migrations, seed, repositories
+│   │       ├── middleware/    # Auth, rate limiting
+│   │       ├── routes/        # auth, domain, ai, system
+│   │       └── tests/         # Jest + supertest suite
+│   └── web/                 # React owner dashboard (Vite)
+├── Dockerfile
 ├── docker-compose.dev.yml
 ├── docker-compose.prod.yml
-├── Dockerfile.api
-├── Dockerfile.web
-├── .github/workflows/
+├── render.yaml
+├── DEPLOYMENT.md
+├── .github/workflows/ci.yml
 └── README.md
 ```
 
 ## 🚀 Quick Start
+
+For production deployment, see **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
 
 ### Prerequisites
 - Node.js 18+
@@ -68,62 +63,53 @@ npm run migrate
 npm run dev
 ```
 
-Access:
-- API: http://localhost:3001
-- Web: http://localhost:3000
+Access (single process — the API serves the built dashboard):
+- App + API: http://localhost:8080
+  - API base: `http://localhost:8080/api`
+  - Health: `/health`  ·  Readiness: `/ready`
 
 ### Testing
 
 ```bash
-# Unit and integration tests
-npm run test
-
-# E2E tests
-npm run test:e2e
+npm run typecheck   # tsc across both workspaces
+npm test            # Jest + supertest (auth, tenant isolation, workflow, hardening)
+npm run build       # compile API + bundle web
 ```
 
-## 📋 Phase 1 Features
+## 📋 Implemented
 
-### ✅ Core Infrastructure
-- [x] Multi-tenant architecture with tenant isolation
-- [x] JWT + 2FA authentication
-- [x] Role-based access control (RBAC)
-- [x] Database schema with migrations
+### Core infrastructure
+- [x] Multi-tenant architecture with row-level tenant isolation
+- [x] JWT authentication (HS256) + bcrypt password hashing
+- [x] Role-based access control (owner / admin / tech / viewer)
+- [x] Database schema with idempotent, boot-time migrations
+- [x] Login rate limiting and baseline security headers
 
-### ✅ Entity Management
-- [x] Tenants (organizations)
-- [x] Users (with roles)
-- [x] Customers
-- [x] Properties
-- [x] Jobs (service tickets)
-- [x] Technicians
-- [x] Estimates
-- [x] Invoices
+### Entity management
+- [x] Tenants, users (with roles), customers, properties
+- [x] Jobs (service tickets), technicians, estimates, invoices, payments
 
-### ✅ Features
-- [x] Owner dashboard (analytics, user management)
-- [x] Technician mobile workflow
-- [x] AI workflow architecture (boundary layer)
-- [x] Payment integration boundary
-- [x] Real-time job status tracking
+### Features
+- [x] Owner dashboard (counts, revenue, outstanding balance)
+- [x] Technician job workflow (assign, status transitions)
+- [x] AI workflow architecture (pluggable estimator boundary)
+- [x] Payment integration boundary (manual ↔ Stripe)
 
-### ✅ Quality
-- [x] Unit tests (>80% coverage)
-- [x] Integration tests
-- [x] Type safety (TypeScript)
-- [x] Error handling
-- [x] API documentation
+### Quality & DevOps
+- [x] Unit + integration tests (auth, tenant isolation, workflow, hardening)
+- [x] Type safety (TypeScript, strict mode)
+- [x] Dockerfile + `docker-compose.{dev,prod}.yml`
+- [x] GitHub Actions CI (typecheck → test → build)
+- [x] Environment configuration via `.env` (see `.env.example`)
 
-### ✅ DevOps
-- [x] Docker support
-- [x] GitHub Actions CI/CD
-- [x] Database migrations
-- [x] Environment configuration
+> **Not yet implemented:** 2FA/TOTP, the React Native technician app, Stripe
+> webhook handling, and real-time (websocket) updates. The AI estimator runs a
+> local heuristic model until `OPENAI_API_KEY` is set. Tracked as future work.
 
 ## 🔐 Authentication Flow
 
 ```
-User → Login → JWT + 2FA → Tenant Isolation → Role-Based Access
+User → Login (bcrypt verify) → JWT issued → Tenant scoping from token → Role-Based Access
 ```
 
 ## 💾 Database Schema
@@ -136,11 +122,12 @@ User → Login → JWT + 2FA → Tenant Isolation → Role-Based Access
 - `jobs` - Service jobs/tickets
 - `technicians` - Field service technicians
 - `estimates` - Service estimates (AI-assisted)
-- `invoices` - Billing (AI-generated)
-- `estimate_line_items` - Estimate details
-- `invoice_line_items` - Invoice details
+- `invoices` - Billing records
+- `payments` - Payments recorded against invoices
+- `ai_jobs` - AI estimate runs (input, output, status)
 
-All tables include `tenant_id` for isolation.
+Every domain table carries `tenant_id`, and every query is scoped by it. A
+request can never read or write another tenant's rows.
 
 ## 🤖 AI Workflow Architecture
 
