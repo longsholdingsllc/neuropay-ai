@@ -10,5 +10,5 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "start": "npm run start --workspace=@neuropay/api"
   },
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=20" }
 }
