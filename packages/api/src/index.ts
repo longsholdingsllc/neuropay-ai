@@ -40,9 +40,9 @@ export function createApp() {
   );
 
   // Readiness — verifies the database is actually reachable, not just that the process is up.
-  app.get("/ready", (_req, res) => {
+  app.get("/ready", async (_req, res) => {
     try {
-      getDb().prepare("SELECT 1").get();
+      await getDb().query("SELECT 1");
       res.json({ status: "ready", db: "ok", ts: new Date().toISOString() });
     } catch (e: any) {
       res.status(503).json({ status: "not-ready", db: "error", error: e.message });
@@ -79,35 +79,41 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  runMigrations();
+  (async () => {
+    await runMigrations();
 
-  // Optional first-boot provisioning of the initial tenant + owner account.
-  if (cfg.seedOnBoot) {
-    const count = (getDb().prepare("SELECT COUNT(*) n FROM tenants").get() as any).n;
-    if (count === 0) {
-      seed("NeuroPay Demo", "demo");
-    } else {
-      console.log("Seed on boot: tenants already exist, skipping.");
+    // Optional first-boot provisioning of the initial tenant + owner account.
+    if (cfg.seedOnBoot) {
+      const row = await getDb().one("SELECT COUNT(*)::int AS n FROM tenants");
+      if ((row?.n ?? 0) === 0) {
+        await seed("NeuroPay Demo", "demo");
+      } else {
+        console.log("Seed on boot: tenants already exist, skipping.");
+      }
     }
-  }
 
-  const app = createApp();
-  const server = app.listen(cfg.port, () => {
-    const tenants = (getDb().prepare("SELECT COUNT(*) n FROM tenants").get() as any).n;
-    console.log(`NeuroPay AI listening on :${cfg.port} | env: ${cfg.nodeEnv} | tenants: ${tenants}`);
-  });
-
-  const shutdown = (signal: string): void => {
-    console.log(`${signal} received — shutting down gracefully.`);
-    server.close(() => {
-      closeDb();
-      console.log("Shutdown complete.");
-      process.exit(0);
+    const app = createApp();
+    const server = app.listen(cfg.port, async () => {
+      const row = await getDb().one("SELECT COUNT(*)::int AS n FROM tenants");
+      console.log(`NeuroPay AI listening on :${cfg.port} | env: ${cfg.nodeEnv} | tenants: ${row?.n ?? 0}`);
     });
-    // Do not hang forever on lingering keep-alive connections.
-    setTimeout(() => process.exit(0), 10000).unref();
-  };
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+    const shutdown = (signal: string): void => {
+      console.log(`${signal} received — shutting down gracefully.`);
+      server.close(() => {
+        void closeDb().then(() => {
+          console.log("Shutdown complete.");
+          process.exit(0);
+        });
+      });
+      // Do not hang forever on lingering keep-alive connections.
+      setTimeout(() => process.exit(0), 10000).unref();
+    };
+
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+  })().catch((e) => {
+    console.error("FATAL: startup failed:", e);
+    process.exit(1);
+  });
 }

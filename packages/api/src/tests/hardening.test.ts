@@ -1,27 +1,27 @@
 import request from "supertest";
-import Database from "better-sqlite3";
 import * as bcrypt from "bcryptjs";
 import * as crypto from "crypto";
 import { initTestDb, getTestApp } from "./setup";
-import { closeDb } from "../db/connection";
+import { closeDb, Db } from "../db/connection";
 
 const uid = () => crypto.randomUUID();
-let db: Database.Database, app: any, tenantId: string, ownerToken: string;
+let db: Db, app: any, tenantId: string, ownerToken: string;
 
 beforeAll(async () => {
-  db = initTestDb();
+  db = await initTestDb();
   app = await getTestApp();
   tenantId = uid();
   const email = `owner-${Date.now()}@test.com`;
-  db.prepare("INSERT INTO tenants (id,name,slug) VALUES (?,?,?)").run(tenantId, "Harden Tenant", `hard-${Date.now()}`);
-  db.prepare("INSERT INTO users (id,tenant_id,email,password_hash,full_name,role) VALUES (?,?,?,?,?,?)").run(
-    uid(), tenantId, email, bcrypt.hashSync("Passw0rd!", 10), "Owner", "owner"
+  await db.query("INSERT INTO tenants (id,name,slug) VALUES ($1,$2,$3)", [tenantId, "Harden Tenant", `hard-${Date.now()}`]);
+  await db.query(
+    "INSERT INTO users (id,tenant_id,email,password_hash,full_name,role) VALUES ($1,$2,$3,$4,$5,$6)",
+    [uid(), tenantId, email, bcrypt.hashSync("Passw0rd!", 10), "Owner", "owner"]
   );
   const login = await request(app).post("/api/auth/login").send({ email, password: "Passw0rd!" });
   expect(login.status).toBe(200);
   ownerToken = login.body.token;
 });
-afterAll(() => closeDb());
+afterAll(async () => { await closeDb(); });
 const auth = () => ({ Authorization: `Bearer ${ownerToken}` });
 
 describe("Production hardening", () => {
@@ -57,7 +57,7 @@ describe("Production hardening", () => {
       .send({ name: "Scoped Customer", tenant_id: forgedTenant, id: "abc" });
     // tenant_id / id are not on the allow-list, so the write is refused outright.
     expect(res.status).toBe(400);
-    const rows = db.prepare("SELECT * FROM customers WHERE tenant_id=?").all(forgedTenant);
+    const rows = await db.all("SELECT * FROM customers WHERE tenant_id=$1", [forgedTenant]);
     expect(rows.length).toBe(0);
   });
 

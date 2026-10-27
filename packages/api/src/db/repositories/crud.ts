@@ -13,6 +13,9 @@ function sanitize(row: any): any {
   return out;
 }
 
+/** $1..$n placeholder list for a column set. */
+const placeholders = (cols: string[], offset = 0) => cols.map((_, i) => `$${offset + i + 1}`).join(",");
+
 /**
  * Split a request body into whitelisted columns and rejected keys.
  * Anything not on the table's allow-list is dropped — the caller decides
@@ -38,14 +41,19 @@ export function crudRouter(table: string, opts: { writableRoles?: string[] } = {
 
   router.use(authRequired);
 
-  router.get("/", (req: AuthedRequest, res) => {
-    const rows = getDb()
-      .prepare(`SELECT * FROM ${table} WHERE tenant_id = ? ORDER BY created_at DESC`)
-      .all(req.tenantId);
-    res.json(rows.map(sanitize));
+  router.get("/", async (req: AuthedRequest, res) => {
+    try {
+      const rows = await getDb().all(
+        `SELECT * FROM ${table} WHERE tenant_id = $1 ORDER BY created_at DESC`,
+        [req.tenantId]
+      );
+      res.json(rows.map(sanitize));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
-  router.post("/", (req: AuthedRequest, res) => {
+  router.post("/", async (req: AuthedRequest, res) => {
     if (!writable.includes(req.user!.role)) return void res.status(403).json({ error: "Insufficient role" });
 
     const { accepted, rejected } = partitionBody(table, req.body);
@@ -61,49 +69,61 @@ export function crudRouter(table: string, opts: { writableRoles?: string[] } = {
     const vals = [id, tenant_id, ...cols.map((c) => accepted[c])];
 
     try {
-      getDb()
-        .prepare(`INSERT INTO ${table} (${allCols.join(",")}) VALUES (${allCols.map(() => "?").join(",")})`)
-        .run(...vals);
-      res.status(201).json(sanitize(getDb().prepare(`SELECT * FROM ${table} WHERE id=? AND tenant_id=?`).get(id, tenant_id)));
+      await getDb().query(
+        `INSERT INTO ${table} (${allCols.join(",")}) VALUES (${placeholders(allCols)})`,
+        vals
+      );
+      const row = await getDb().one(`SELECT * FROM ${table} WHERE id=$1 AND tenant_id=$2`, [id, tenant_id]);
+      res.status(201).json(sanitize(row));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  router.get("/:id", (req: AuthedRequest, res) => {
-    const row = getDb().prepare(`SELECT * FROM ${table} WHERE id=? AND tenant_id=?`).get(req.params.id, req.tenantId);
-    if (!row) return void res.status(404).json({ error: "Not found" });
-    res.json(sanitize(row));
+  router.get("/:id", async (req: AuthedRequest, res) => {
+    try {
+      const row = await getDb().one(`SELECT * FROM ${table} WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.tenantId]);
+      if (!row) return void res.status(404).json({ error: "Not found" });
+      res.json(sanitize(row));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
-  router.put("/:id", (req: AuthedRequest, res) => {
+  router.put("/:id", async (req: AuthedRequest, res) => {
     if (!writable.includes(req.user!.role)) return void res.status(403).json({ error: "Insufficient role" });
 
-    const existing = getDb().prepare(`SELECT * FROM ${table} WHERE id=? AND tenant_id=?`).get(req.params.id, req.tenantId);
-    if (!existing) return void res.status(404).json({ error: "Not found" });
-
-    const { accepted, rejected } = partitionBody(table, req.body);
-    if (rejected.length) {
-      return void res.status(400).json({ error: `Unsupported fields: ${rejected.join(", ")}` });
-    }
-    const cols = Object.keys(accepted);
-    if (!cols.length) return void res.status(400).json({ error: "No writable fields provided" });
-
-    const set = cols.map((c) => `${c}=?`).join(",");
     try {
-      getDb()
-        .prepare(`UPDATE ${table} SET ${set} WHERE id=? AND tenant_id=?`)
-        .run(...cols.map((c) => accepted[c]), req.params.id, req.tenantId);
-      res.json(sanitize(getDb().prepare(`SELECT * FROM ${table} WHERE id=? AND tenant_id=?`).get(req.params.id, req.tenantId)));
+      const existing = await getDb().one(`SELECT * FROM ${table} WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.tenantId]);
+      if (!existing) return void res.status(404).json({ error: "Not found" });
+
+      const { accepted, rejected } = partitionBody(table, req.body);
+      if (rejected.length) {
+        return void res.status(400).json({ error: `Unsupported fields: ${rejected.join(", ")}` });
+      }
+      const cols = Object.keys(accepted);
+      if (!cols.length) return void res.status(400).json({ error: "No writable fields provided" });
+
+      const set = cols.map((c, i) => `${c}=$${i + 1}`).join(",");
+      await getDb().query(
+        `UPDATE ${table} SET ${set} WHERE id=$${cols.length + 1} AND tenant_id=$${cols.length + 2}`,
+        [...cols.map((c) => accepted[c]), req.params.id, req.tenantId]
+      );
+      const row = await getDb().one(`SELECT * FROM ${table} WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.tenantId]);
+      res.json(sanitize(row));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  router.delete("/:id", roleRequired("owner", "admin"), (req: AuthedRequest, res) => {
-    const r = getDb().prepare(`DELETE FROM ${table} WHERE id=? AND tenant_id=?`).run(req.params.id, req.tenantId);
-    if (r.changes === 0) return void res.status(404).json({ error: "Not found" });
-    res.json({ ok: true });
+  router.delete("/:id", roleRequired("owner", "admin"), async (req: AuthedRequest, res) => {
+    try {
+      const r = await getDb().query(`DELETE FROM ${table} WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.tenantId]);
+      if (r.rowCount === 0) return void res.status(404).json({ error: "Not found" });
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   return router;

@@ -15,9 +15,9 @@ export function verifyToken(token: string): JwtPayload {
   const cfg = loadConfig();
   return jwt.verify(token, cfg.jwtSecret) as JwtPayload;
 }
-export function authenticate(email: string, password: string): AuthUser | null {
+export async function authenticate(email: string, password: string): Promise<AuthUser | null> {
   const db = getDb();
-  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email.toLowerCase().trim()) as any;
+  const user = await db.one("SELECT * FROM users WHERE email = $1", [email.toLowerCase().trim()]);
   if (!user) return null;
   if (!bcrypt.compareSync(password, user.password_hash)) return null;
   return { id: user.id, tenantId: user.tenant_id, email: user.email, role: user.role, fullName: user.full_name };

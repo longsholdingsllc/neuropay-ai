@@ -7,7 +7,7 @@ NeuroPay AI is a production-ready SaaS platform for field service management, fe
 ## 🏗️ Architecture
 
 - **Backend**: Node.js + Express + TypeScript (`packages/api`)
-- **Database**: SQLite via `better-sqlite3`, multi-tenant row scoping
+- **Database**: Postgres via `pg` (hosted — e.g. Supabase; `DATABASE_URL`), multi-tenant row scoping
 - **Frontend**: React + TypeScript + Vite (`packages/web`), served by the API
 - **Auth**: JWT (HS256) + bcrypt; role-based access control
 - **AI/Workflows**: pluggable estimator boundary (local heuristic → OpenAI)

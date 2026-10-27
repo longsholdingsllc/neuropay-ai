@@ -1,5 +1,3 @@
-import * as path from "path";
-
 export interface Config {
   port: number;
   nodeEnv: string;
@@ -32,7 +30,9 @@ export function loadConfig(): Config {
     nodeEnv: env("NODE_ENV") || "production",
     jwtSecret: env("JWT_SECRET") || "",
     jwtExpiresIn: env("JWT_EXPIRES_IN") || "7d",
-    dbUrl: env("DATABASE_URL") || "file:./data/neuropay.db",
+    // Postgres connection string. Hosted (e.g. Supabase): use the provider's
+    // connection string. Local default matches docker-compose.dev.yml.
+    dbUrl: env("DATABASE_URL") || "postgres://neuropay:neuropay@localhost:5432/neuropay",
     adminEmail: env("ADMIN_EMAIL") || "",
     adminPassword: env("ADMIN_PASSWORD") || "",
     openaiApiKey: env("OPENAI_API_KEY") || undefined,
@@ -42,12 +42,4 @@ export function loadConfig(): Config {
     corsOrigin: env("CORS_ORIGIN") || "*",
     seedOnBoot: bool("SEED_ON_BOOT", false)
   };
-}
-
-export function resolveDbPath(dbUrl: string, baseDir: string): string {
-  if (dbUrl.startsWith("file:")) {
-    const rest = dbUrl.slice("file:".length);
-    return rest.startsWith("./") ? path.resolve(baseDir, rest.slice(2)) : rest;
-  }
-  return dbUrl;
 }

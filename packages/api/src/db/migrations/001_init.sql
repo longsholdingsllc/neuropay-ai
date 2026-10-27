@@ -1,30 +1,33 @@
-PRAGMA foreign_keys = ON;
+-- NeuroPay AI initial schema (Postgres dialect).
+-- Ported 1:1 from the original SQLite migration: same tables, columns and
+-- semantics. Text timestamps became TIMESTAMPTZ with now() defaults; amounts
+-- became DOUBLE PRECISION; the technicians.active flag stays INTEGER (0/1).
 
 CREATE TABLE IF NOT EXISTS tenants (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   email TEXT NOT NULL, password_hash TEXT NOT NULL, full_name TEXT,
   role TEXT NOT NULL DEFAULT 'owner', phone TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (tenant_id, email)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (tenant_id, email)
 );
 CREATE TABLE IF NOT EXISTS customers (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name TEXT NOT NULL, email TEXT, phone TEXT, address TEXT, notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS properties (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
   name TEXT NOT NULL, address TEXT, type TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS technicians (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name TEXT NOT NULL, email TEXT, phone TEXT, specialty TEXT, active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -33,33 +36,33 @@ CREATE TABLE IF NOT EXISTS jobs (
   technician_id TEXT REFERENCES technicians(id) ON DELETE SET NULL,
   title TEXT NOT NULL, description TEXT,
   status TEXT NOT NULL DEFAULT 'scheduled', priority TEXT NOT NULL DEFAULT 'normal',
-  scheduled_for TEXT, estimate_amount REAL, actual_amount REAL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  scheduled_for TEXT, estimate_amount DOUBLE PRECISION, actual_amount DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS estimates (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL, customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
-  amount REAL NOT NULL, status TEXT NOT NULL DEFAULT 'draft', line_items TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  amount DOUBLE PRECISION NOT NULL, status TEXT NOT NULL DEFAULT 'draft', line_items TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS invoices (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL, customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
   estimate_id TEXT REFERENCES estimates(id) ON DELETE SET NULL,
-  amount REAL NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-  issued_at TEXT, paid_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  amount DOUBLE PRECISION NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+  issued_at TEXT, paid_at TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   invoice_id TEXT REFERENCES invoices(id) ON DELETE SET NULL, customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
-  amount REAL NOT NULL, method TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'succeeded',
-  external_ref TEXT, received_at TEXT NOT NULL DEFAULT (datetime('now'))
+  amount DOUBLE PRECISION NOT NULL, method TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'succeeded',
+  external_ref TEXT, received_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS ai_jobs (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL, kind TEXT NOT NULL,
   input TEXT, output TEXT, status TEXT NOT NULL DEFAULT 'pending',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);

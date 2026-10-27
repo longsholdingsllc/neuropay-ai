@@ -1,11 +1,10 @@
 import request from "supertest";
-import Database from "better-sqlite3";
 import { initTestDb, getTestApp } from "./setup";
 import { closeDb } from "../db/connection";
 
 let app: any;
-beforeAll(async () => { initTestDb(); app = await getTestApp(); });
-afterAll(() => closeDb());
+beforeAll(async () => { await initTestDb(); app = await getTestApp(); });
+afterAll(async () => { await closeDb(); });
 
 describe("Health & auth basics", () => {
   it("GET /health returns ok", async () => {

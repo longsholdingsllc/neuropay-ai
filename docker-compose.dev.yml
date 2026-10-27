@@ -1,4 +1,16 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: neuropay
+      POSTGRES_PASSWORD: neuropay
+      POSTGRES_DB: neuropay
+    ports:
+      - "5432:5432"
+    volumes:
+      - neuropay_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
   api:
     build: .
     ports:
@@ -6,15 +18,15 @@ services:
     environment:
       NODE_ENV: development
       PORT: "8080"
-      DATABASE_URL: file:/app/packages/api/data/neuropay.db
+      DATABASE_URL: postgres://neuropay:neuropay@db:5432/neuropay
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-0123456789}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-owner@acme.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-neuropay}
       SEED_ON_BOOT: "true"
       PUBLIC_APP_URL: http://localhost:8080
-    volumes:
-      - neuropay_data:/app/packages/api/data
+    depends_on:
+      - db
     restart: unless-stopped
 
 volumes:
-  neuropay_data:
+  neuropay_pgdata:

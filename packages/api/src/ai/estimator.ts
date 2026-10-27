@@ -28,11 +28,13 @@ export function generateJobEstimate(job: { title: string; description?: string }
   };
 }
 
-export function createAIEstimate(job: any): any {
+export async function createAIEstimate(job: any): Promise<any> {
   const output = JSON.stringify(generateJobEstimate({ title: job.title, description: job.description }));
   const id = uid();
   const db = getDb();
-  db.prepare("INSERT INTO ai_jobs (id,tenant_id,job_id,kind,input,output,status) VALUES (?,?,?,?,?,?,?)")
-    .run(id, job.tenant_id, job.id, "estimate", JSON.stringify({ title: job.title, description: job.description }), output, "done");
+  await db.query(
+    "INSERT INTO ai_jobs (id,tenant_id,job_id,kind,input,output,status) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    [id, job.tenant_id, job.id, "estimate", JSON.stringify({ title: job.title, description: job.description }), output, "done"]
+  );
   return { id, kind: "estimate", output, status: "done" };
 }

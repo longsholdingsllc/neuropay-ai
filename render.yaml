@@ -1,34 +1,30 @@
 # Render blueprint — deploys NeuroPay AI as a single Docker web service.
 #
-# NOTE: this service is single-instance by design. The SQLite database lives on
-# the attached persistent disk at /app/packages/api/data and cannot be safely
-# shared across replicas. Scale vertically, not horizontally, until the data
-# layer is moved to Postgres.
+# The data layer is hosted Postgres (DATABASE_URL): the app was ported off
+# embedded SQLite, so the service needs NO persistent disk and can run on
+# Render's free plan. Point DATABASE_URL at any Postgres — e.g. a free
+# Supabase project's connection string (session pooler, port 5432).
 #
-# Secrets (JWT_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD, OPENAI_API_KEY,
-# STRIPE_SECRET_KEY) are NOT defined here — set them in the Render dashboard
-# under Environment, or via `render.yaml` envVars with sync: false.
+# Secrets (DATABASE_URL, JWT_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD,
+# OPENAI_API_KEY, STRIPE_SECRET_KEY) are declared with sync: false — set
+# their values in the Render dashboard under Environment. Never commit them.
 
 services:
   - type: web
     name: neuropay-ai
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: ohio
     healthCheckPath: /health
     autoDeploy: true
-    disk:
-      name: neuropay-data
-      mountPath: /app/packages/api/data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: "8080"
       - key: DATABASE_URL
-        value: file:/app/packages/api/data/neuropay.db
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: JWT_EXPIRES_IN

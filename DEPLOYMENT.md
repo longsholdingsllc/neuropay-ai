@@ -1,7 +1,8 @@
 # Deploying NeuroPay AI
 
 NeuroPay AI ships as a **single Node service** that serves both the JSON API and
-the built React dashboard. That makes it deployable to any container host with a
+the built React dashboard. The database is hosted Postgres, so the service is
+stateless — deployable to any container host, including free tiers with no
 persistent disk.
 
 ## Architecture
@@ -10,7 +11,7 @@ persistent disk.
 | --- | --- | --- |
 | Backend API | Node 18+ / Express / TypeScript | `packages/api` |
 | Frontend | React 18 + Vite (built to static files) | `packages/web` |
-| Database | SQLite via `better-sqlite3` | file on disk |
+| Database | Postgres via `pg` | hosted (`DATABASE_URL`) |
 | Auth | JWT (HS256) + bcrypt password hashes | `packages/api/src/services/auth.ts` |
 | Tenant isolation | `tenant_id` on every row, scoped from the JWT | `packages/api/src/db/repositories/crud.ts` |
 | AI boundary | Pluggable estimator (local heuristic → OpenAI) | `packages/api/src/ai/estimator.ts` |
@@ -27,7 +28,7 @@ All values are read from the process environment. **Never commit them.**
 | --- | --- | --- |
 | `NODE_ENV` | yes | `production` |
 | `PORT` | yes | Defaults to `8080`; most hosts inject this |
-| `DATABASE_URL` | yes | `file:/app/packages/api/data/neuropay.db` on a container host |
+| `DATABASE_URL` | yes | Postgres connection string, e.g. a Supabase project's session-pooler URL (port 5432) |
 | `JWT_SECRET` | **yes** | ≥16 chars. Boot refuses to start without it. `openssl rand -base64 48` |
 | `JWT_EXPIRES_IN` | no | Default `7d` |
 | `ADMIN_EMAIL` | first boot | Initial owner account |
@@ -50,49 +51,48 @@ Fly secrets, Docker secrets, or your platform's equivalent). Do not put them in
 
 ## Option A — Render (blueprint included)
 
-`render.yaml` defines a Docker web service with a 1 GB persistent disk mounted at
-`/app/packages/api/data` (where SQLite lives).
+`render.yaml` defines a Docker web service on the **free** plan with **no
+persistent disk** — all state lives in the hosted Postgres that `DATABASE_URL`
+points at (e.g. a free Supabase project).
 
-1. Push the repo to GitHub.
-2. In Render: **New → Blueprint**, select the repo. It reads `render.yaml`.
-3. Set the `sync: false` secrets in the dashboard: `JWT_SECRET`,
-   `ADMIN_EMAIL`, `ADMIN_PASSWORD` (and optionally `OPENAI_API_KEY`,
-   `STRIPE_SECRET_KEY`).
-4. Apply. Render builds the Dockerfile and starts the service.
-5. Health check path is `/health`.
-
-> The service is **single-instance by design**. SQLite on a disk cannot be
-> shared across replicas — do not scale horizontally until the data layer is
-> migrated to Postgres.
+1. Create a Postgres database (free tier is fine) and copy its connection
+   string — for Supabase, the session-pooler string (port 5432).
+2. Push the repo to GitHub.
+3. In Render: **New → Blueprint**, select the repo. It reads `render.yaml`.
+4. Set the `sync: false` secrets in the dashboard: `DATABASE_URL` (the string
+   from step 1), `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` (and optionally
+   `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`).
+5. Apply. Render builds the Dockerfile and starts the service. Migrations run
+   automatically on first boot.
+6. Health check path is `/health`.
 
 ## Option B — any Docker host
 
+The production compose file brings its own Postgres:
+
+```bash
+POSTGRES_PASSWORD="a-strong-db-password" JWT_SECRET="$(openssl rand -base64 48)" \
+  docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Or run the image directly against any reachable Postgres:
+
 ```bash
 docker build -t neuropay-ai .
-# The image runs as uid 1000. If you bind-mount a host directory, chown it first:
-#   sudo chown -R 1000:1000 /srv/neuropay-data
 docker run -d --name neuropay-ai -p 8080:8080 \
+  -e DATABASE_URL="postgres://user:password@host:5432/dbname" \
   -e JWT_SECRET="$(openssl rand -base64 48)" \
   -e ADMIN_EMAIL="you@yourdomain.com" \
   -e ADMIN_PASSWORD="a-strong-password" \
   -e SEED_ON_BOOT=true \
-  -v neuropay_data:/app/packages/api/data \
   neuropay-ai
-```
-
-Or with compose:
-
-```bash
-JWT_SECRET="$(openssl rand -base64 48)" docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ## Option C — Fly.io
 
 ```bash
 fly launch --no-deploy          # detect the Dockerfile
-fly volumes create neuropay_data --size 1
-# mount it at /app/packages/api/data in fly.toml
-fly secrets set JWT_SECRET="..." ADMIN_EMAIL="..." ADMIN_PASSWORD="..."
+fly secrets set DATABASE_URL="postgres://..." JWT_SECRET="..." ADMIN_EMAIL="..." ADMIN_PASSWORD="..."
 fly deploy
 ```
 
@@ -117,7 +117,7 @@ Build and run the production bundle locally:
 
 ```bash
 npm run build
-JWT_SECRET=dev-secret-at-least-16-chars DATABASE_URL=file:./data/local.db \
+JWT_SECRET=dev-secret-at-least-16-chars DATABASE_URL=postgres://neuropay:neuropay@localhost:5432/neuropay \
   SEED_ON_BOOT=true node packages/api/dist/index.js
 ```
 
@@ -137,55 +137,21 @@ reachable — use `/ready` as the real readiness gate.
 ## Container security model
 
 The image runs as the built-in unprivileged **`node`** user (uid 1000), not root.
-
-### Volume ownership is load-bearing
-
-The runtime stage creates `/app/packages/api/data` and chowns it to `node`, then
-drops privileges with `USER node`. This ordering matters.
-
-The app enables SQLite **WAL** mode, which needs write access to the *directory* —
-for the `-wal` and `-shm` sidecar files — not just the database file. A named
-volume is initialised from the image's directory, so a `node`-owned data directory
-is what lets the non-root process write to the volume.
-
-**If you bind-mount a host directory instead of using a named volume, you must
-chown it first:**
-
-```bash
-mkdir -p /srv/neuropay-data
-sudo chown -R 1000:1000 /srv/neuropay-data
-docker run -v /srv/neuropay-data:/app/packages/api/data ...
-```
-
-A root-owned data directory handed to a non-root process fails at startup with
-`SQLITE_CANTOPEN`. Verified both ways:
-
-| Data directory owner | Process user | Result |
-| --- | --- | --- |
-| `root:root` | uid 1000 | `SQLITE_CANTOPEN` |
-| `node:node` (uid 1000) | uid 1000 | opens, WAL enabled, writes succeed |
-
-### Render note
-
-The `render.yaml` disk is mounted at `/app/packages/api/data`. Render applies the
-mount at runtime, which can shadow the image's directory ownership. If the service
-fails to start with a database error, set `PUID`/`PGID` behaviour aside and instead
-confirm in Render's shell:
-
-```bash
-ls -ld /app/packages/api/data     # expect node node (or 1000:1000)
-```
-
-If it shows `root root`, chown it once from the Render shell. The Dockerfile
-handles the common named-volume case automatically.
+The image is stateless — no data directory, no volumes — because all state lives
+in the hosted Postgres reached via `DATABASE_URL`. The connection string is a
+secret: it is only ever supplied through the host's environment, never baked
+into the image or committed.
 
 ## Operational notes
 
 - **`JWT_SECRET` rotation** invalidates all existing sessions. Expected.
-- **Backups**: the entire data set is one SQLite file. Back it up by copying
-  `/app/packages/api/data/neuropay.db`.
-- **Scaling**: single instance only while on SQLite. Migrate to Postgres before
-  adding replicas.
+- **Backups**: handled by the Postgres provider (e.g. Supabase's automatic
+  backups / point-in-time recovery on paid tiers, or `pg_dump` against
+  `DATABASE_URL` for self-hosted).
+- **Scaling**: the app is stateless and pool-based, so replicas are safe. Keep
+  the total pool size across replicas within the database's connection limit —
+  behind a transaction pooler (e.g. Supabase pooler port 6543) this is a
+  non-issue at small scale.
 - **Login rate limiting** is in-process (fixed window, 100 attempts / 15 min per
   IP). Behind multiple replicas each holds its own counter; move to a shared
   store when you scale out.
